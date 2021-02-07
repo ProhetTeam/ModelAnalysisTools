@@ -115,19 +115,7 @@ class ModelAnalyticalTool:
         for name, para in self.model.named_parameters():
             if 'conv' in name and name.endswith('weight') and 'gn' not in name:
                 parameters_dict[name] = para.cpu().flatten().detach().numpy()
-        
-        '''
-        interval = int(len(parameters_dict) // smaple_num)
-        smaple_para_names = list(parameters_dict)[0:len(parameters_dict): interval][0:smaple_num]
-        para_data =  [parameters_dict[para_name] for para_name in smaple_para_names] 
-        para_names = [name for name in smaple_para_names] 
-        fig_temp = ff.create_distplot(self.down_sample_data(para_data, max_data_length), 
-                                        para_names,
-                                        histnorm='probability',
-                                        bin_size = bin_size, 
-                                        show_curve = False,
-                                        show_rug = False)
-        '''
+
         if not self.is_quant:
             sample_parameters_dict = self.sampleN_dict(parameters_dict, sample_num = sample_num)
             fig_temp = self.displot_plotly(sample_parameters_dict, max_data_length, bin_size)
