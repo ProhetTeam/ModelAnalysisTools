@@ -97,7 +97,8 @@ class ModelAnalyticalTool:
             save nn.Conve and nn.Linear Input Tensor
             save BatchNorm and Relu layer output 
         """
-        if name not in ["conv1", "bn1", "relu", "maxpool"]:
+        #if name not in ["conv1", "bn1", "relu", "maxpool"]:
+        if True:
             if isinstance(module, (nn.Conv2d, nn.Linear)):
                 self._layers_input_dict[name] = input[0].cpu().detach().numpy().copy()
             elif isinstance(module, nn.ReLU):
@@ -112,9 +113,9 @@ class ModelAnalyticalTool:
         print('Start to analyze Weigths Distribution')
         
         parameters_dict = OrderedDict()
-        for name, para in self.model.named_parameters():
-            if 'conv' in name and name.endswith('weight') and 'gn' not in name:
-                parameters_dict[name] = para.cpu().flatten().detach().numpy()
+        for n, m in self.model.named_modules():
+            if isinstance(m, nn.Conv2d):
+                parameters_dict[n] = m.weight.cpu().flatten().detach().numpy()
 
         if not self.is_quant:
             sample_parameters_dict = self.sampleN_dict(parameters_dict, sample_num = sample_num)
@@ -154,7 +155,7 @@ class ModelAnalyticalTool:
                           max_data_length: int = 2e4,
                           bin_size = 0.02):
         sample_quant_weight = self.sampleN_dict(self._quant_weight, smaple_num)
-        sample_float_weight = OrderedDict({k[6:]: self._parameters_dict[k[6:] + '.weight'] for k in sample_quant_weight})
+        sample_float_weight = OrderedDict({k[6:]: self._parameters_dict[k[6:]] for k in sample_quant_weight})
 
         r"""1. Compute Weights Similarity """ 
         sample_para_diff_dict = self.cos_difference_metric(sample_quant_weight, sample_float_weight)
@@ -213,21 +214,12 @@ class ModelAnalyticalTool:
 
     def extract_quant_info(self):
         self._quant_weight = OrderedDict()
-        self._quant_activation = OrderedDict() 
-        def get_quant_variable(name, module):
-            for n, m in self.model.named_children():
-                for n, m in module.named_children():
-                    get_quant_variable(".".join([name, n]), m)
-                if len(list(module.children())) == 0 \
-                        and isinstance(module, self.quant_layers):
-                    try:
-                        self._quant_weight["quant." + name] = module.Qweight.cpu().detach().numpy().copy().flatten()
-                        self._quant_activation["quant." + name] = module.Qactivation.cpu().detach().numpy().copy().flatten()
-                    except AttributeError as error:
-                        raise error("Your quantization layer should have \
-                             self._quant_weight and self._quant_activation member!!!")
-        for n, m in self.model.named_children():
-            get_quant_variable(n, m) 
+        self._quant_activation = OrderedDict()
+
+        for name, module in self.model.named_modules():
+            if isinstance(module, self.quant_layers):
+                self._quant_weight["quant." + name] = module.Qweight.cpu().detach().numpy().copy().flatten()
+                self._quant_activation["quant." + name] = module.Qactivation.cpu().detach().numpy().copy().flatten()
 
     def activation_dist_analysis(self, 
                                  infer_func, 
