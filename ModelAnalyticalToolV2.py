@@ -279,5 +279,6 @@ class QModelAnalysis:
         self.fig['layout']['xaxis2']['title']='Value'
         self.fig['layout']['yaxis2']['title']='Ratio'
 
+        self.fig.write_json(self.save_path.split('.html')[0] + '.json')
         self.fig.write_html(self.save_path) 
         
