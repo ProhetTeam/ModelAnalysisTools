@@ -11,3 +11,12 @@ python3 tools/model_analysis.py img-path work_dirs/atss_r50_fpn_1x_coco_Nuscenes
 
 [2] Two Models analysis command.
 
+```
+python3 tools/model_analysis_v2.py 
+ img-path
+ --config-float float-config-path \
+ --config-int   int-config-path \
+ --checkpoint-float float-model.pth \ 
+ --checkpoint-int int-model.pth \
+ --device cpu
+```

@@ -3,7 +3,8 @@ import torch.backends.cudnn as cudnn
 import torch
 import torch.nn as nn
 import copy
-
+import inspect
+import scipy
 try:
     from thirdparty.mtransformer.DSQ.DSQConv import DSQConv
     from thirdparty.mtransformer.APOT.APOTLayers import APOTQuantConv2d
@@ -27,6 +28,8 @@ from plotly.subplots import make_subplots
 from collections import defaultdict
 import plotly.figure_factory as ff
 import pandas as pd
+import torch.nn.functional as F
+
 of.offline.init_notebook_mode(connected=True)
 
 seed = 10
@@ -108,7 +111,50 @@ class DistanceMetric:
                 b = dict_b[key]
             except:
                 b = dict_b[key[6:]]
-            res[key] = np.dot(a, b) / (norm(a) * norm(b)) * 100
+            res[key] = 100 - np.dot(a, b) / (norm(a) * norm(b)) * 100
+        return res
+    
+    def KL_divergence(self, dict_p: OrderedDict(), dict_q: OrderedDict(), num_interval: int = 150) -> OrderedDict():
+        self.num_interval = num_interval
+        res = OrderedDict()
+        for key in dict_p:
+            a = dict_p[key]
+            try:
+                b = dict_q[key]
+            except:
+                b = dict_q[key[6:]]
+            epsilon = 1e-7
+            minimum = min(min(a), min(b))
+            maximum = max(max(a), max(b))
+            interval = (maximum - minimum) / self.num_interval
+            A = np.arange(minimum, maximum, interval)
+            x, y = [], []
+            for i in range(1, len(A)):
+                pos_x = (a <= A[i])
+                pos_y = (b <= A[i])
+                x.append((pos_x.sum() - sum(x)))
+                y.append((pos_y.sum() - sum(y)))
+            pos_x = a > A[i]
+            pos_y = b > A[i]
+            x.append(pos_x.sum())
+            y.append(pos_y.sum())
+            x = np.array(x) + epsilon
+            y = np.array(y) + epsilon
+            px = x/sum(x)
+            py = y/sum(y)
+            KL = scipy.stats.entropy(x, y)
+            res[key] = KL
+        return res
+
+    def correlation(self, dict_a: OrderedDict(), dict_b: OrderedDict()) -> OrderedDict():
+        res = OrderedDict()
+        for key in dict_a:
+            a = dict_a[key]
+            try:
+                b = dict_b[key]
+            except:
+                b = dict_b[key[6:]]
+            res[key] = ((a-np.mean(a))*(b-np.mean(b))).mean() / (np.std(a) * np.std(b))
         return res
 
 class QModelAnalysis:
@@ -163,22 +209,25 @@ class QModelAnalysis:
         sample_weight_quant = sample_func1(self.model_quant._quant_weight)
 
         r""" 1. Compute weights similarity """
-        sample_para_diff1 = self.distance_metrix.cos_diff_metric(sample_weight_fake, sample_weight_float)
-        sample_para_diff2 = self.distance_metrix.cos_diff_metric(sample_weight_fake, sample_weight_quant)
-        self.fig.add_trace(
-            go.Scatter(
-                x = list(sample_para_diff1.keys()),
-                y = [val for _, val in sample_para_diff1.items()],
-                name = 'Float.Fake.Similarity',
-                mode = 'lines+markers'
-            ),row = 2, col = 1)
-        self.fig.add_trace(
-            go.Scatter(
-                x = list(sample_para_diff2.keys()),
-                y = [val for _, val in sample_para_diff2.items()],
-                name = 'Fake.Quant.Similarity',
-                mode = 'lines+markers'
-            ),row = 2, col = 1)
+        dis_funcs = inspect.getmembers(DistanceMetric, lambda a: inspect.isfunction(a))
+
+        for dis_func in dis_funcs:
+            sample_para_diff1 = dis_func[1](self.distance_metrix, sample_weight_float, sample_weight_fake)
+            sample_para_diff2 = dis_func[1](self.distance_metrix, sample_weight_fake, sample_weight_quant)
+            self.fig.add_trace(
+                go.Scatter(
+                    x = list(sample_para_diff1.keys()),
+                    y = [val for _, val in sample_para_diff1.items()],
+                    name = 'Float.Fake.{}'.format(dis_func[0]),
+                    mode = 'lines+markers'
+                ),row = 2, col = 1)
+            self.fig.add_trace(
+                go.Scatter(
+                    x = list(sample_para_diff2.keys()),
+                    y = [val for _, val in sample_para_diff2.items()],
+                    name = 'Fake.Quant.{}'.format(dis_func[0]),
+                    mode = 'lines+markers'
+                ),row = 2, col = 1)
         
         r""" 2. Weights distribution plot  """
         keys = list(sample_weight_float.keys())
@@ -202,22 +251,24 @@ class QModelAnalysis:
         sample_act_float = OrderedDict({k:self.model_float._layers_input_dict[k] for k in sample_act_quant})
 
         r""" 1. Compute activation similarity """
-        sample_para_diff1 = self.distance_metrix.cos_diff_metric(sample_act_fake, sample_act_float)
-        sample_para_diff2 = self.distance_metrix.cos_diff_metric(sample_act_fake, sample_act_quant)
-        self.fig.add_trace(
-            go.Scatter(
-                x = list(sample_para_diff1.keys()),
-                y = [val for _, val in sample_para_diff1.items()],
-                name = 'Float.Fake.Similarity',
-                mode = 'lines+markers'
-            ),row = 2, col = 2)
-        self.fig.add_trace(
-            go.Scatter(
-                x = list(sample_para_diff2.keys()),
-                y = [val for _, val in sample_para_diff2.items()],
-                name = 'Fake.Quant.Similarity',
-                mode = 'lines+markers'
-            ),row = 2, col = 2)
+        dis_funcs = inspect.getmembers(DistanceMetric, lambda a: inspect.isfunction(a))
+        for dis_func in dis_funcs: 
+            sample_para_diff1 = dis_func[1](self.distance_metrix, sample_act_float, sample_act_fake)
+            sample_para_diff2 = dis_func[1](self.distance_metrix, sample_act_fake, sample_act_quant)
+            self.fig.add_trace(
+                go.Scatter(
+                    x = list(sample_para_diff1.keys()),
+                    y = [val for _, val in sample_para_diff1.items()],
+                    name = 'Float.Fake.{}'.format(dis_func[0]),
+                    mode = 'lines+markers'
+                ),row = 2, col = 2)
+            self.fig.add_trace(
+                go.Scatter(
+                    x = list(sample_para_diff2.keys()),
+                    y = [val for _, val in sample_para_diff2.items()],
+                    name = 'Fake.Quant.{}'.format(dis_func[0]),
+                    mode = 'lines+markers'
+                ),row = 2, col = 2)
         
         r""" 2. Activation distribution plot  """
         keys = list(sample_act_float.keys())
