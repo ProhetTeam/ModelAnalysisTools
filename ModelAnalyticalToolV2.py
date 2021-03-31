@@ -165,7 +165,8 @@ class QModelAnalysis:
                  max_data_length: int = 2e4, 
                  bin_size: float = 0.02, 
                  is_train: bool = False,
-                 save_path: str = 'model_analysis.html') -> None:
+                 save_path: str = 'model_analysis.html',
+                 use_torch_plot: bool = True) -> None:
         """
         Initializes model and plot figure.
         """
@@ -179,6 +180,7 @@ class QModelAnalysis:
         self.sample_num = smaple_num
         self.max_data_length = max_data_length
         self.bin_size = bin_size
+        self.use_torch_plot = use_torch_plot
 
         subplot_titles = ('Weight Distribution', 'Activation Distribution', \
                           'Weight Quant Similarity', 'Activation Quant Similarity')
@@ -235,13 +237,17 @@ class QModelAnalysis:
            'quant.' + k: sample_weight_quant[k] for k in keys}))
         sample_weight_float.update(OrderedDict({
            'fake.' + k: sample_weight_fake[k] for k in keys}))
-        fig_temp = self.displot_plotly(sample_weight_float, self.max_data_length, self.bin_size)
+        
+        if self.use_torch_plot:
+            self.plot_dict_torch_plotly(sample_weight_float, row = 1, col = 1)
+        else:
+            fig_temp = self.displot_plotly(sample_weight_float, self.max_data_length, self.bin_size)
 
-        for idx, ele in enumerate(fig_temp['data']):
-            ele['marker']['color'] = 'rgb({}, {}, {})'.format(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+            for idx, ele in enumerate(fig_temp['data']):
+                ele['marker']['color'] = 'rgb({}, {}, {})'.format(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
 
-        [self.fig.add_trace(go.Histogram(ele), 
-                        row = 1, col = 1) for ele in fig_temp['data']]
+            [self.fig.add_trace(go.Histogram(ele), 
+                            row = 1, col = 1) for ele in fig_temp['data']]
 
     def activation_analysis(self):
         sample_func1 = partial(self.sampler, sample_num = self.sample_num)
@@ -276,12 +282,16 @@ class QModelAnalysis:
            'quant.' + k: sample_act_quant[k] for k in keys}))
         sample_act_float.update(OrderedDict({
            'fake.' + k: sample_act_fake[k] for k in keys}))
-        fig_temp = self.displot_plotly(sample_act_float, self.max_data_length, self.bin_size)
         
-        for idx, ele in enumerate(fig_temp['data']):
-            ele['marker']['color'] = 'rgb({}, {}, {})'.format(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-        [self.fig.add_trace(go.Histogram(ele), 
-                        row = 1, col = 2) for ele in fig_temp['data']]
+        if self.use_torch_plot:
+            self.plot_dict_torch_plotly(sample_act_float, row = 1, col = 2)
+        else:
+            fig_temp = self.displot_plotly(sample_act_float, self.max_data_length, self.bin_size)
+            
+            for idx, ele in enumerate(fig_temp['data']):
+                ele['marker']['color'] = 'rgb({}, {}, {})'.format(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+            [self.fig.add_trace(go.Histogram(ele), 
+                            row = 1, col = 2) for ele in fig_temp['data']]
     
     def displot_plotly(self, data_dict: OrderedDict(),
                        max_data_length: int = 2e4,
@@ -295,6 +305,26 @@ class QModelAnalysis:
                                         show_curve = False,
                                         show_rug = False)
         return fig
+    
+    def plot_dict_torch_plotly(self,data: OrderedDict(), bins: int = 1000, row : int = 1, col: int = 1):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        for name, val in data.items():
+            val_torch = torch.from_numpy(val)
+            """ 1. Generate Y """
+            val_temp = val_torch.to(device).histc(bins = bins) / val_torch.shape[0]
+            data_list_y = val_temp.cpu().detach().numpy().flatten().copy()
+            
+            """ 2. Generate x """
+            x_temp = torch.linspace(val_torch.min(), val_torch.max(), steps = bins).to(device)
+            data_list_x = x_temp.cpu().detach().numpy().flatten().copy()
+
+            """ 3. Draw plotly """
+            color = 'rgb({}, {}, {})'.format(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+            self.fig.add_trace(go.Scatter(x = data_list_x, 
+                                    y = data_list_y,
+                                    name = name,
+                                    line = dict(color = color),
+                                    mode='lines'), row = row, col = col)
 
     def sampler(self, data, sample_num = -1):
         if isinstance(data, OrderedDict):
@@ -308,7 +338,7 @@ class QModelAnalysis:
             return smaple_result
         elif isinstance(data, list): #data: list[Numpy]
             if sample_num == - 1:
-                return dat
+                return data
             smaple_result = []
             res = []
             for ele in data:
