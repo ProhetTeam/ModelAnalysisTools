@@ -103,7 +103,7 @@ class ModelDeploy:
                 self._weight[name] = module.weight.cpu().flatten().detach().numpy()
 
 class DistanceMetric:
-    def cos_diff_metric(self, dict_a: OrderedDict(), dict_b: OrderedDict()) -> OrderedDict():
+    def cos_similarity_metric(self, dict_a: OrderedDict(), dict_b: OrderedDict()) -> OrderedDict():
         res = OrderedDict()
         for key in dict_a:
             a = dict_a[key]
@@ -111,39 +111,30 @@ class DistanceMetric:
                 b = dict_b[key]
             except:
                 b = dict_b[key[6:]]
-            res[key] = 100 - np.dot(a, b) / (norm(a) * norm(b)) * 100
+            res[key] = np.dot(a, b) / (norm(a) * norm(b))
         return res
     
     def KL_divergence(self, dict_p: OrderedDict(), dict_q: OrderedDict(), num_interval: int = 150) -> OrderedDict():
         self.num_interval = num_interval
         res = OrderedDict()
-        for key in dict_p:
-            a = dict_p[key]
-            try:
-                b = dict_q[key]
-            except:
-                b = dict_q[key[6:]]
-            epsilon = 1e-7
-            minimum = min(min(a), min(b))
-            maximum = max(max(a), max(b))
-            interval = (maximum - minimum) / self.num_interval
-            A = np.arange(minimum, maximum, interval)
-            x, y = [], []
-            for i in range(1, len(A)):
-                pos_x = (a <= A[i])
-                pos_y = (b <= A[i])
-                x.append((pos_x.sum() - sum(x)))
-                y.append((pos_y.sum() - sum(y)))
-            pos_x = a > A[i]
-            pos_y = b > A[i]
-            x.append(pos_x.sum())
-            y.append(pos_y.sum())
-            x = np.array(x) + epsilon
-            y = np.array(y) + epsilon
-            px = x/sum(x)
-            py = y/sum(y)
-            KL = scipy.stats.entropy(x, y)
-            res[key] = KL
+
+        device = "cuda" if torch.cuda.is_available() else "cpu" 
+        for name, val in dict_p.items():
+            p = torch.from_numpy(val).to(device)
+            q = torch.from_numpy(dict_q[name]).to(device)
+
+            min_num = torch.min(p.min(), q.min())
+            max_mun = torch.max(p.max(), q.max())
+            p_dist = p.histc(bins = 2000, min = min_num, max = max_mun) / p.shape[0]
+            q_dist = q.histc(bins = 2000, min = min_num, max = max_mun) / q.shape[0]
+            p_dist[p_dist == 0] = torch.tensor(1e-7, dtype = p_dist.dtype, device = p_dist.device)
+            q_dist[q_dist == 0] = torch.tensor(1e-7, dtype = q_dist.dtype, device = q_dist.device)
+
+            r""""
+            Other Method: res[name] = F.kl_div(q_dist.log(), p_dist, reduction = 'mean').cpu().detach().numpy()
+            """
+            res[name] = (p_dist * torch.log2(p_dist/q_dist)).sum().cpu().detach().numpy()
+
         return res
 
     def correlation(self, dict_a: OrderedDict(), dict_b: OrderedDict()) -> OrderedDict():
