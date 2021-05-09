@@ -41,7 +41,7 @@ torch.cuda.manual_seed_all(seed)
 
 QUATN_LAYERS = (DSQConv, LSQConv2d, APOTQuantConv2d, LSQDPlusConv2d)
 
-class ModelDeploy:
+class OneModelDeploy:
     _version: int = 1
 
     def __init__(self, model: nn.Module):
@@ -98,61 +98,16 @@ class ModelDeploy:
                 try:
                     self._quant_weight[name] = module.Qweight.cpu().detach().numpy().copy().flatten()
                     self._quant_activation[name] = module.Qactivation.cpu().detach().numpy().copy().flatten()
-                except AttributeError:
-                    raise AttributeError('Please Trun On Debug!!!!')
+                except:
+                    self._quant_weight[name] = None
+                    self._quant_activation[name] = None
+                    
             if isinstance(module, nn.Conv2d): 
                 self._weight[name] = module.weight.cpu().flatten().detach().numpy()
 
-class DistanceMetric:
-    def cos_similarity_metric(self, dict_a: OrderedDict(), dict_b: OrderedDict()) -> OrderedDict():
-        res = OrderedDict()
-        for key in dict_a:
-            a = dict_a[key]
-            try:
-                b = dict_b[key]
-            except:
-                b = dict_b[key[6:]]
-            res[key] = np.dot(a, b) / (norm(a) * norm(b))
-        return res
-    
-    def KL_divergence(self, dict_p: OrderedDict(), dict_q: OrderedDict(), num_interval: int = 150) -> OrderedDict():
-        self.num_interval = num_interval
-        res = OrderedDict()
-
-        device = "cuda" if torch.cuda.is_available() else "cpu" 
-        for name, val in dict_p.items():
-            p = torch.from_numpy(val).to(device)
-            q = torch.from_numpy(dict_q[name]).to(device)
-
-            min_num = torch.min(p.min(), q.min())
-            max_mun = torch.max(p.max(), q.max())
-            p_dist = p.histc(bins = 2000, min = min_num, max = max_mun) / p.shape[0]
-            q_dist = q.histc(bins = 2000, min = min_num, max = max_mun) / q.shape[0]
-            p_dist[p_dist == 0] = torch.tensor(1e-7, dtype = p_dist.dtype, device = p_dist.device)
-            q_dist[q_dist == 0] = torch.tensor(1e-7, dtype = q_dist.dtype, device = q_dist.device)
-
-            r""""
-            Other Method: res[name] = F.kl_div(q_dist.log(), p_dist, reduction = 'mean').cpu().detach().numpy()
-            """
-            res[name] = (p_dist * torch.log2(p_dist/q_dist)).sum().cpu().detach().numpy()
-
-        return res
-
-    def correlation(self, dict_a: OrderedDict(), dict_b: OrderedDict()) -> OrderedDict():
-        res = OrderedDict()
-        for key in dict_a:
-            a = dict_a[key]
-            try:
-                b = dict_b[key]
-            except:
-                b = dict_b[key[6:]]
-            res[key] = ((a-np.mean(a))*(b-np.mean(b))).mean() / (np.std(a) * np.std(b))
-        return res
-
-class QModelAnalysis:
+class OneModelAnalysis:
     def __init__(self,
-                 model_float: nn.Module,
-                 model_quant: nn.Module,
+                 model: nn.Module,
                  smaple_num = 10,
                  max_data_length: int = 2e4, 
                  bin_size: float = 0.02, 
@@ -162,8 +117,7 @@ class QModelAnalysis:
         """
         Initializes model and plot figure.
         """
-        self.model_float = ModelDeploy(model_float)
-        self.model_quant   = ModelDeploy(model_quant)
+        self.model = OneModelDeploy(model)
         self.save_path   = save_path
 
         """
@@ -174,21 +128,16 @@ class QModelAnalysis:
         self.bin_size = bin_size
         self.use_torch_plot = use_torch_plot
 
-        subplot_titles = ('Weight Distribution', 'Activation Distribution', \
-                          'Weight Quant Similarity', 'Activation Quant Similarity')
-        specs = [[{"type": "Histogram"}, {"type": "Histogram"}],
-                 [{"type": "scatter"}, {"type": "Scatter"}]]
+        subplot_titles = ('Weight Distribution', 'Activation Distribution')
+        specs = [[{"type": "Histogram"}, {"type": "Histogram"}]]
         self.fig = make_subplots(
-            rows = 2, cols = 2,
+            rows = 1, cols = 2,
             column_widths=[0.5, 0.5],
             specs = specs,
             subplot_titles= subplot_titles)
 
-        self.distance_metrix = DistanceMetric()
-
     def __call__(self, infer_func, *args, **kwargs):
-        self.model_float(infer_func, *args, **kwargs)
-        self.model_quant(infer_func, *args, **kwargs)
+        self.model(infer_func, *args, **kwargs)
 
         self.weight_analysis()
         self.activation_analysis()
@@ -196,94 +145,27 @@ class QModelAnalysis:
 
     def weight_analysis(self):
         sample_func1 = partial(self.sampler, sample_num = self.sample_num)
+        sample_weight = sample_func1(self.model._weight)
+        sample_weight_quant = sample_func1(self.model._quant_weight)
 
-        assert(len(self.model_float._weight) == len(self.model_quant._weight))
-        sample_weight_float = sample_func1(self.model_float._weight)
-        sample_weight_fake = sample_func1(self.model_quant._weight)
-        sample_weight_quant = sample_func1(self.model_quant._quant_weight)
+        keys = list(sample_weight.keys())
+        sample_weight.update(OrderedDict({
+           'quant.' + k: sample_weight_quant[k] for k in keys if k in sample_weight_quant}))
 
-        r""" 1. Compute weights similarity """
-        dis_funcs = inspect.getmembers(DistanceMetric, lambda a: inspect.isfunction(a))
-
-        for dis_func in dis_funcs:
-            sample_para_diff1 = dis_func[1](self.distance_metrix, sample_weight_float, sample_weight_fake)
-            sample_para_diff2 = dis_func[1](self.distance_metrix, sample_weight_fake, sample_weight_quant)
-            self.fig.add_trace(
-                go.Scatter(
-                    x = list(sample_para_diff1.keys()),
-                    y = [val for _, val in sample_para_diff1.items()],
-                    name = 'Float.Fake.{}'.format(dis_func[0]),
-                    mode = 'lines+markers'
-                ),row = 2, col = 1)
-            self.fig.add_trace(
-                go.Scatter(
-                    x = list(sample_para_diff2.keys()),
-                    y = [val for _, val in sample_para_diff2.items()],
-                    name = 'Fake.Quant.{}'.format(dis_func[0]),
-                    mode = 'lines+markers'
-                ),row = 2, col = 1)
+        self.plot_dict_torch_plotly(sample_weight, row = 1, col = 1)
         
-        r""" 2. Weights distribution plot  """
-        keys = list(sample_weight_float.keys())
-        sample_weight_float.update(OrderedDict({
-           'quant.' + k: sample_weight_quant[k] for k in keys}))
-        sample_weight_float.update(OrderedDict({
-           'fake.' + k: sample_weight_fake[k] for k in keys}))
-        
-        if self.use_torch_plot:
-            self.plot_dict_torch_plotly(sample_weight_float, row = 1, col = 1)
-        else:
-            fig_temp = self.displot_plotly(sample_weight_float, self.max_data_length, self.bin_size)
-
-            for idx, ele in enumerate(fig_temp['data']):
-                ele['marker']['color'] = 'rgb({}, {}, {})'.format(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-
-            [self.fig.add_trace(go.Histogram(ele), 
-                            row = 1, col = 1) for ele in fig_temp['data']]
 
     def activation_analysis(self):
         sample_func1 = partial(self.sampler, sample_num = self.sample_num)
 
-        sample_act_quant = sample_func1(self.model_quant._quant_activation)
-        sample_act_fake = OrderedDict({k:self.model_quant._layers_input_dict[k] for k in sample_act_quant})
-        sample_act_float = OrderedDict({k:self.model_float._layers_input_dict[k] for k in sample_act_quant})
+        sample_act= sample_func1(self.model._layers_input_dict)
+        sample_act_quant = sample_func1(self.model._quant_activation) 
 
-        r""" 1. Compute activation similarity """
-        dis_funcs = inspect.getmembers(DistanceMetric, lambda a: inspect.isfunction(a))
-        for dis_func in dis_funcs: 
-            sample_para_diff1 = dis_func[1](self.distance_metrix, sample_act_float, sample_act_fake)
-            sample_para_diff2 = dis_func[1](self.distance_metrix, sample_act_fake, sample_act_quant)
-            self.fig.add_trace(
-                go.Scatter(
-                    x = list(sample_para_diff1.keys()),
-                    y = [val for _, val in sample_para_diff1.items()],
-                    name = 'Float.Fake.{}'.format(dis_func[0]),
-                    mode = 'lines+markers'
-                ),row = 2, col = 2)
-            self.fig.add_trace(
-                go.Scatter(
-                    x = list(sample_para_diff2.keys()),
-                    y = [val for _, val in sample_para_diff2.items()],
-                    name = 'Fake.Quant.{}'.format(dis_func[0]),
-                    mode = 'lines+markers'
-                ),row = 2, col = 2)
-        
-        r""" 2. Activation distribution plot  """
-        keys = list(sample_act_float.keys())
-        sample_act_float.update(OrderedDict({
-           'quant.' + k: sample_act_quant[k] for k in keys}))
-        sample_act_float.update(OrderedDict({
-           'fake.' + k: sample_act_fake[k] for k in keys}))
-        
-        if self.use_torch_plot:
-            self.plot_dict_torch_plotly(sample_act_float, row = 1, col = 2)
-        else:
-            fig_temp = self.displot_plotly(sample_act_float, self.max_data_length, self.bin_size)
-            
-            for idx, ele in enumerate(fig_temp['data']):
-                ele['marker']['color'] = 'rgb({}, {}, {})'.format(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-            [self.fig.add_trace(go.Histogram(ele), 
-                            row = 1, col = 2) for ele in fig_temp['data']]
+        keys = list(sample_act.keys())
+        sample_act.update(OrderedDict({
+           'quant.' + k: sample_act_quant[k] for k in keys if k in sample_act_quant}))
+       
+        self.plot_dict_torch_plotly(sample_act, row = 1, col = 2, mode = "lines")
     
     def displot_plotly(self, data_dict: OrderedDict(),
                        max_data_length: int = 2e4,
@@ -298,7 +180,9 @@ class QModelAnalysis:
                                         show_rug = False)
         return fig
     
-    def plot_dict_torch_plotly(self,data: OrderedDict(), bins: int = 1000, row : int = 1, col: int = 1):
+    def plot_dict_torch_plotly(self,data: OrderedDict(), bins: int = 1000, 
+                                row : int = 1, col: int = 1,
+                                mode = 'lines'):
         device = "cuda" if torch.cuda.is_available() else "cpu"
         for name, val in data.items():
             val_torch = torch.from_numpy(val)
@@ -311,12 +195,13 @@ class QModelAnalysis:
             data_list_x = x_temp.cpu().detach().numpy().flatten().copy()
 
             """ 3. Draw plotly """
+            random.seed(name)
             color = 'rgb({}, {}, {})'.format(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
             self.fig.add_trace(go.Scatter(x = data_list_x, 
                                     y = data_list_y,
                                     name = name,
                                     line = dict(color = color),
-                                    mode='lines'), row = row, col = col)
+                                    mode=mode), row = row, col = col)
 
     def sampler(self, data, sample_num = -1):
         if isinstance(data, OrderedDict):
@@ -354,4 +239,3 @@ class QModelAnalysis:
 
         self.fig.write_json(self.save_path.split('.html')[0] + '.json')
         self.fig.write_html(self.save_path) 
-        
