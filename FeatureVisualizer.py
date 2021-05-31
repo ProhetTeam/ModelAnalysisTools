@@ -271,6 +271,8 @@ extra_names = ['r18-fp32',
                'r18-int4',
                'r18-int3']
 '''
+
+'''
 configs = ['thirdparty/configs/benchmark/config7_mobilev2_float_2m_b64_coslr.py',
            'thirdparty/configs/LSQDPlusBack/config20_mobilenetv2_lsqdplus_int4_addoffset_lr4x_selfback_4m.py',
            'thirdparty/configs/LSQDPlus/config13_mobilenetv2_lsqdplus_int3_addoffset_lr4x_4m.py',
@@ -285,6 +287,21 @@ extra_names = ['MBV2-fp32',
                'MBV2-int3',
                'MBV2-2w4f']
 
+'''
+
+configs = ['thirdparty/configs/benchmark/config5_res50_float_2m_b64_coslr.py',
+           'thirdparty/configs/LSQDPlus/config9_res50_lsqdplus_int4_addoffset_lr4x__4m.py',
+           'thirdparty/configs/LSQDPlus/config10_res50_lsqdplus_int3_addoffset_coslr4x__4m.py',
+           'thirdparty/configs/LSQDPlus/config11_res50_lsqdplus_2w4f_addoffset_lr4x__4m.py',
+           ]
+checkpoints = ['thirdparty/modelzoo/res50.pth',
+               'work_dirs/LSQDPlus/config9_res50_lsqdplus_int3_addoffset_lr4x__4m/epoch_108.pth',
+               'work_dirs/LSQDPlus/config10_res50_lsqdplus_int3_addoffset_coslr4x__4m/latest.pth',
+               'work_dirs/LSQDPlus/config11_res50_lsqdplus_2w4f_addoffset_lr4x__4m/latest.pth']
+extra_names = ['Res50-fp32', 
+               'Res50-int4',
+               'Res50-int3',
+               'Res50-2w4f']
 
 
 save_path = 'features.jpg'
