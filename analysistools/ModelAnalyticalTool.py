@@ -1,21 +1,13 @@
+from re import S
 import random
 import torch.backends.cudnn as cudnn
 import torch
 import torch.nn as nn
-import copy
 import inspect
-import scipy
-try:
-    from thirdparty.mtransformer.DSQ.DSQConv import DSQConv
-    from thirdparty.mtransformer.APOT.APOTLayers import APOTQuantConv2d
-    from thirdparty.mtransformer.LSQ.LSQConv import LSQConv2d
-    from thirdparty.mtransformer.LSQPlus import LSQDPlusConv2d
-except ImportError:
-    raise ImportError("Please import ALL Qunat layer!!!!")
+
+
 
 from collections import OrderedDict
-import mmcv
-from mmcv import Config, DictAction
 from mmcv.runner import get_dist_info, init_dist
 from mmcv.utils import get_git_hash
 import numpy as np
@@ -31,7 +23,7 @@ import plotly.figure_factory as ff
 import pandas as pd
 import torch.nn.functional as F
 
-of.offline.init_notebook_mode(connected=True)
+# of.offline.init_notebook_mode(connected=True)
 
 seed = 10
 random.seed(seed)
@@ -39,10 +31,8 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 
-QUATN_LAYERS = (DSQConv, LSQConv2d, APOTQuantConv2d, LSQDPlusConv2d)
 
 class ModelDeploy:
-    _version: int = 1
 
     def __init__(self, model: nn.Module):
         self.model = model
@@ -94,7 +84,7 @@ class ModelDeploy:
     
     def extract_model_info(self):
         for name, module in self.model.named_modules():
-            if isinstance(module, QUATN_LAYERS):
+            if str(type(module)) in QUANT_LAYERS:
                 try:
                     self._quant_weight[name] = module.Qweight.cpu().detach().numpy().copy().flatten()
                     self._quant_activation[name] = module.Qactivation.cpu().detach().numpy().copy().flatten()
@@ -150,9 +140,11 @@ class DistanceMetric:
         return res
 
 class QModelAnalysis:
+    
     def __init__(self,
                  model_float: nn.Module,
                  model_quant: nn.Module,
+                 quant_layers: list,
                  smaple_num = 10,
                  max_data_length: int = 2e4, 
                  bin_size: float = 0.02, 
@@ -162,6 +154,8 @@ class QModelAnalysis:
         """
         Initializes model and plot figure.
         """
+        global QUANT_LAYERS
+        QUANT_LAYERS = quant_layers
         self.model_float = ModelDeploy(model_float)
         self.model_quant   = ModelDeploy(model_quant)
         self.save_path   = save_path

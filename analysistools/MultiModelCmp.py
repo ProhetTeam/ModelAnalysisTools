@@ -6,13 +6,6 @@ import copy
 import inspect
 import scipy
 from torch.nn import modules
-try:
-    from thirdparty.mtransformer.DSQ.DSQConv import DSQConv
-    from thirdparty.mtransformer.APOT.APOTLayers import APOTQuantConv2d
-    from thirdparty.mtransformer.LSQ.LSQConv import LSQConv2d
-    from thirdparty.mtransformer.LSQPlus import LSQDPlusConv2d
-except ImportError:
-    raise ImportError("Please import ALL Qunat layer!!!!")
 
 from collections import OrderedDict
 import mmcv
@@ -32,7 +25,7 @@ import plotly.figure_factory as ff
 import pandas as pd
 import torch.nn.functional as F
 
-of.offline.init_notebook_mode(connected=True)
+# of.offline.init_notebook_mode(connected=True)
 
 seed = 10
 random.seed(seed)
@@ -40,7 +33,6 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 
-QUATN_LAYERS = (DSQConv, LSQConv2d, APOTQuantConv2d, LSQDPlusConv2d)
 
 class OneModelDeploy:
     _version: int = 1
@@ -95,20 +87,20 @@ class OneModelDeploy:
     
     def extract_model_info(self):
         for name, module in self.model.named_modules():
-            if isinstance(module, QUATN_LAYERS):
+             if str(type(module)) in QUANT_LAYERS:
                 try:
                     self._quant_weight[name] = module.Qweight.cpu().detach().numpy().copy().flatten()
                     self._quant_activation[name] = module.Qactivation.cpu().detach().numpy().copy().flatten()
                 except:
                     self._quant_weight[name] = None
                     self._quant_activation[name] = None
-                    
-            if isinstance(module, nn.Conv2d): 
+             if isinstance(module, nn.Conv2d): 
                 self._weight[name] = module.weight.cpu().flatten().detach().numpy()
 
 class MultiModelCmp:
     def __init__(self,
                  models,
+                 quant_layers:list,
                  smaple_num = 10,
                  max_data_length: int = 2e4, 
                  bin_size: float = 0.02, 
@@ -119,6 +111,8 @@ class MultiModelCmp:
         """
         Initializes model and plot figure.
         """
+        global QUANT_LAYERS
+        QUANT_LAYERS = quant_layers
         extra_names = range(0, len(models)) if extra_names is None else extra_names
         self.models = OrderedDict()
         for name, model in zip(extra_names, models):
