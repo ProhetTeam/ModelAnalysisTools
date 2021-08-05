@@ -1,9 +1,10 @@
 from argparse import ArgumentParser
 
-from thirdparty.mtransformer.builder import QUANLAYERS
+import sys
+sys.path.append('../')
 
-from .analysistools.OneModelAnalyticalTool import OneModelAnalysis
-from ..lowbit_classification.apis import init_model, inference_model
+from analysistools.OneModelAnalyticalTool import OneModelAnalysis
+from lowbit_classification.lbitcls.apis import init_model, inference_model
 
 def infer(model, img):
     out= model(img, return_loss=False)
@@ -11,7 +12,7 @@ def infer(model, img):
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument('img', help='Image file')
+    parser.add_argument('--img', help='Image file', default='1260,1180006216d1c0')
     parser.add_argument('--config', help='Config file')
     parser.add_argument('--checkpoint', help = 'Int checkpoint file')
     parser.add_argument('--save-path', type = str, default= "./model_analysis.html", help = "html save path")
